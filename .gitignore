@@ -1,0 +1,13 @@
+.env
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.ruff_cache/
+data/
+research_swarm.egg-info/
+artifacts/reports/
+artifacts/snapshots/
+artifacts/traces.jsonl

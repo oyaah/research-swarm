@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install deps first — this layer is cached as long as pyproject.toml doesn't change
+COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir -U pip \
+    && pip install --no-cache-dir ".[browser]" \
+    && python -m playwright install --with-deps chromium
+
+# Copy source last — cache busts only the COPY layers, not pip/playwright
+COPY agents ./agents
+COPY api ./api
+COPY frontend ./frontend
+COPY services ./services
+COPY tools ./tools
+COPY scripts ./scripts
+COPY tests ./tests
+COPY data ./data
+
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]

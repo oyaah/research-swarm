@@ -1,0 +1,59 @@
+[project]
+name = "research-swarm"
+version = "0.1.0"
+description = "Production-grade multi-agent research swarm with LangGraph"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.0",
+  "uvicorn[standard]==0.30.0",
+  "sse-starlette==2.1.0",
+  "pydantic==2.8.0",
+  "pydantic-settings==2.4.0",
+  "langgraph>=0.3.0",
+  "langchain-core>=0.3.15",
+  "langsmith>=0.1.125",
+  "qdrant-client==1.11.0",
+  "supabase==2.8.0",
+  "httpx==0.27.0",
+  "requests==2.32.0",
+  "prompt_toolkit==3.0.47",
+  "rich==13.9.4",
+  "python-dotenv==1.0.1",
+  "orjson==3.10.7",
+]
+
+[project.optional-dependencies]
+ui = [
+  "streamlit==1.39.0",
+]
+artifacts = [
+  "matplotlib==3.9.0",
+  "reportlab==4.2.0",
+]
+browser = [
+  "playwright==1.58.0",
+]
+dev = [
+  "pytest==8.3.0",
+  "pytest-asyncio==0.24.0",
+  "pytest-cov==5.0.0",
+  "ruff>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+research-swarm-cli = "frontend.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["api*", "services*", "tools*", "frontend*"]
