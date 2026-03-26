@@ -225,11 +225,7 @@ Install [u-mem](https://github.com/oyaah/u-mem) and set `UMEM_SRC_PATH` if neede
 | `GET` | `/v1/sessions` | List sessions |
 | `GET` | `/v1/tools` | Tool schema |
 
-## Tests
 
-```bash
-python -m pytest tests/ -q
-```
 
 ## File Layout
 
