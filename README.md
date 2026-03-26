@@ -1,6 +1,7 @@
 # Research Swarm
 
-Autonomous multi-agent research system with LLM-driven orchestration. Not a pipeline — an arena where AI agents operate with true agency.
+Autonomous multi-agent research system with LLM-driven orchestration. Not a pipeline — an arena where AI agents operate with true agency.Works with both open source and close sourced models.
+
 
 ## What It Does
 
