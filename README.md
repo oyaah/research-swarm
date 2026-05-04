@@ -46,6 +46,8 @@ Evidence items are embedded (Together.xyz BAAI/bge-base-en-v1.5, falls back to l
 ---
 
 ## Screenshot
+<img width="1884" height="765" alt="Screenshot 2026-05-04 at 4 24 31 PM" src="https://github.com/user-attachments/assets/073af357-56dd-4a91-b879-3306ebb07720" />
+
 
 ```bash
 python -m frontend.cli
