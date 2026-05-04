@@ -489,7 +489,6 @@ def main() -> int:
         lane_text = f"  ·  lane: {args.lane_preference}" if args.mode == "portfolio" else ""
         settings_line = f"mode: {args.mode}  ·  budget: {args.budget_mode}  ·  depth: {args.depth}  ·  provider: {args.provider_pref}{lane_text}"
         print(f"{DIM}  {settings_line}   (override: ::budget=high ::mode=portfolio ::depth=deep){RESET}")
-        print(f"{BOLD}What do you want to research?{RESET}")
         if args.mode == "portfolio" and args.provider_pref in {"auto", "mixed", "groq"}:
             print(f"{DIM}Portfolio lane: [1] both  [2] groq_fast  [3] groq_deep  (Enter keeps current: {args.lane_preference}){RESET}")
             lane_choice = smart_prompt("> ").strip().lower()
@@ -502,6 +501,7 @@ def main() -> int:
                 args.lane_preference = "fast"
             elif lane_choice in {"3", "deep", "groq_deep"}:
                 args.lane_preference = "deep"
+        print(f"{BOLD}What do you want to research?{RESET}")
         while True:
             query = smart_prompt("> ").strip()
             if not query:
