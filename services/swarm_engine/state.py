@@ -90,3 +90,5 @@ class SwarmState(TypedDict, total=False):
     tool_logs: list[dict[str, Any]]
     trace: list[dict[str, Any]]
     error: str
+    user_plan_feedback: str
+    pending_steer: str

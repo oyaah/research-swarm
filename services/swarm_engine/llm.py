@@ -145,6 +145,11 @@ class LLMAdapter:
                 return {"next_action": "end_waiting", "rationale": "awaiting human input"}
             if not state_snapshot.get("has_plan"):
                 return {"next_action": "planner", "rationale": "need an execution plan"}
+            if state_snapshot.get("pending_steer"):
+                steer = state_snapshot["pending_steer"]
+                if not state_snapshot.get("evidence_count", 0):
+                    return {"next_action": "planner", "rationale": f"steer → replan with new direction: {steer[:60]}"}
+                return {"next_action": "researcher", "rationale": f"steer → redirect research: {steer[:60]}", "focus_query": steer}
             if state_snapshot.get("has_final_markdown"):
                 if not state_snapshot.get("postprocessed", False):
                     return {"next_action": "postprocess", "rationale": "final draft exists; postprocess first"}
@@ -172,6 +177,7 @@ class LLMAdapter:
             "You are the central orchestrator of a multi-agent research swarm.\n"
             "Your job: decide what happens NEXT to best answer the user's query.\n\n"
             "Available actions and what they do:\n"
+            "- planner: Build or revise the research plan. Use when direction needs to change.\n"
             "- researcher: Search the web, fetch URLs, extract evidence. Use when you need MORE data.\n"
             "- verifier: Score each evidence item for reliability and contradictions. Use AFTER research.\n"
             "- analyst: Analyze evidence quality, decide if coverage is sufficient, identify gaps.\n"
@@ -186,8 +192,13 @@ class LLMAdapter:
             "- If avg_verification_score > 0.7 and evidence_count >= 5: likely ready to write\n"
             "- If budget is low: prioritize writing over perfecting evidence\n"
             "- Do NOT loop researcher→verifier endlessly if scores aren't improving\n\n"
+            "STEERING INSTRUCTIONS (pending_steer field):\n"
+            "- If pending_steer is non-empty, the user has sent a mid-session direction change.\n"
+            "- If the new direction is a fundamentally different topic/angle → route to planner (force replan).\n"
+            "- If it is a refinement of current research → route to researcher with focus_query set to pending_steer.\n"
+            "- ALWAYS act on pending_steer before continuing normal flow.\n\n"
             "Return JSON with keys: next_action (string), rationale (string), "
-            "focus_query (string, optional refined search query), "
+            "focus_query (string, optional refined search query or steer direction), "
             "research_batch_size (int, optional), verify_indices (array<int>, optional).\n"
             f"Allowed next_action values: {allowed_actions}\n\n"
             f"User query: {query}\n"

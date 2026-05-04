@@ -333,9 +333,17 @@ async def orchestrator_node(state: SwarmState) -> SwarmState:
     budget_exhausted = budget_left <= 0
     route = state.get("model_routes", {}).get("planner", {})
 
+    # Pull any pending steer messages from runtime into graph state so the
+    # orchestrator LLM sees them and can route intelligently (replan vs redirect).
+    incoming_steers = list(runtime.steer_messages.get(state["session_id"], []))
+    if incoming_steers:
+        state = {**state, "pending_steer": incoming_steers[-1]}
+        runtime.steer_messages[state["session_id"]] = []
+
     items = state.get("evidence_items", [])
     verified = [i for i in items if i.get("verification_score", 0) > 0]
     avg_score = (sum(i["verification_score"] for i in verified) / len(verified)) if verified else 0.0
+    pending_steer = state.get("pending_steer", "").strip()
     snapshot = {
         "has_plan": bool(state.get("plan")),
         "plan_items": len(state.get("plan", [])),
@@ -357,6 +365,7 @@ async def orchestrator_node(state: SwarmState) -> SwarmState:
         "save_done": bool(state.get("save_done", False)),
         "has_metrics": bool(state.get("metrics")),
         "researcher_exhausted": bool(state.get("researcher_exhausted", False)),
+        "pending_steer": pending_steer,
     }
     decision = await llm.orchestrate(
         query=state.get("user_query", ""),
@@ -368,6 +377,18 @@ async def orchestrator_node(state: SwarmState) -> SwarmState:
     rationale = str(decision.get("rationale", "")).strip()
     focus_query = str(decision.get("focus_query", "")).strip()
     replan = next_action == "planner" and bool(state.get("plan"))
+
+    # Act on pending steer: orchestrator has seen it and decided next_action.
+    # Route it to the right place so downstream agents consume it correctly.
+    if pending_steer and not state.get("final_markdown"):
+        if next_action == "planner":
+            state = {**state, "force_replan": True, "user_plan_feedback": pending_steer, "pending_steer": ""}
+            replan = True
+            rationale = rationale or f"steer → replan with new direction: {pending_steer[:80]}"
+        elif next_action in {"researcher", "verifier", "analyst"}:
+            state = {**state, "focus_query": pending_steer, "pending_steer": ""}
+            rationale = rationale or f"steer → redirecting research: {pending_steer[:80]}"
+        # writer/postprocess/save/metrics/end: leave pending_steer, will be consumed next cycle
     req_batch = decision.get("research_batch_size")
     if isinstance(req_batch, int) and req_batch > 0:
         state = {**state, "research_batch_size": req_batch}
@@ -505,6 +526,9 @@ async def planner_node(state: SwarmState) -> SwarmState:
 
     route = state.get("model_routes", {}).get("planner", {})
     planner_context = state.get("memory_context", "")
+    user_feedback = state.get("user_plan_feedback", "").strip()
+    if user_feedback:
+        planner_context = f"[User feedback on previous plan — incorporate this direction]: {user_feedback}\n\n{planner_context}"
     search_res = web_search(
         query=state["user_query"],
         num=max(1, int(settings.planner_search_results)),
@@ -641,6 +665,7 @@ async def planner_node(state: SwarmState) -> SwarmState:
         "force_replan": False,
         "researcher_exhausted": False,
         "queries_asked": [],
+        "user_plan_feedback": "",
     }
 
 
@@ -679,6 +704,21 @@ async def hitl_node(state: SwarmState) -> SwarmState:
         event = _event(session_id, "HITL_Approval", {"answer": answer}, "trace")
         await runtime.emit(session_id, event)
         if stage == "plan":
+            if not approved:
+                # Substantive feedback → force replan with user direction injected into planner context
+                await runtime.emit(
+                    session_id,
+                    _event(session_id, "HITL_Approval", {"replan": True, "feedback": cleaned[:200]}, "trace"),
+                )
+                return {
+                    **state,
+                    "pending_hitl": False,
+                    "hitl_answer": cleaned,
+                    "plan_approved": False,
+                    "force_replan": True,
+                    "user_plan_feedback": cleaned,
+                    "interrupt_stage": "",
+                }
             return {**state, "pending_hitl": False, "hitl_answer": answer, "plan_approved": True, "interrupt_stage": ""}
         if approved:
             skipped.add(stage)
@@ -720,12 +760,8 @@ async def researcher_node(state: SwarmState) -> SwarmState:
     source_hints = state.get("source_hints", [])
     default_route = state.get("model_routes", {}).get("researcher", {})
     researcher_routes = state.get("researcher_routes", []) or [default_route]
-    steer_items = runtime.steer_messages.get(state["session_id"], [])
-    if steer_items:
-        latest = steer_items[-1]
-        state = {**state, "focus_query": latest}
-        runtime.steer_messages[state["session_id"]] = []
-        await _agent_message(state["session_id"], "Human", "Researcher", f"Steer update: {latest}")
+    # Steer messages are now consumed by orchestrator_node before routing here.
+    # focus_query is already set on state if orchestrator decided to redirect.
 
     processed = 0
     any_new_query = False
@@ -1514,6 +1550,8 @@ async def run_session(
         "queries_asked": [],
         "researcher_exhausted": False,
         "replan_attempts": 0,
+        "user_plan_feedback": "",
+        "pending_steer": "",
     }
     cfg = {"configurable": {"thread_id": session_id}}
     graph_runner = _build_graph() if isolated_graph else compiled_graph
