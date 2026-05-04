@@ -71,21 +71,37 @@ def save_cli_setup(data: dict[str, Any]) -> None:
 
 
 def interactive_provider_setup() -> None:
-    print("\nProvider setup (leave blank to skip):")
-    mapping = [
-        ("GROQ_API_KEY", "Groq API key"),
-        ("DEEPSEEK_API_KEY", "Together/DeepSeek API key"),
-        ("GEMINI_API_KEY", "Gemini API key"),
-        ("OPENAI_API_KEY", "OpenAI API key"),
-        ("ANTHROPIC_API_KEY", "Anthropic API key"),
+    print("\nLLM provider setup (leave blank to skip):")
+    llm_mapping = [
+        ("GROQ_API_KEY", "Groq API key (free tier, fast — console.groq.com)"),
+        ("ANTHROPIC_API_KEY", "Anthropic API key (Claude models — console.anthropic.com)"),
+        ("OPENAI_API_KEY", "OpenAI API key (platform.openai.com)"),
+        ("DEEPSEEK_API_KEY", "Together.ai API key (api.together.xyz — powers DeepSeek/Llama)"),
+        ("GEMINI_API_KEY", "Gemini API key (aistudio.google.com)"),
     ]
     existing_env = dotenv_values(".env") if os.path.exists(".env") else {}
-    for env_name, label in mapping:
+    for env_name, label in llm_mapping:
         existing = os.environ.get(env_name, "") or str(existing_env.get(env_name, "") or "")
-        if existing:
-            print(f"- {label}: already set")
+        if existing and existing not in {"stub", ""}:
+            print(f"  {label}: already set")
             continue
-        val = input(f"- {label}: ").strip()
+        val = input(f"  {label}: ").strip()
+        if val:
+            os.environ[env_name] = val
+            save_env_key(env_name, val)
+
+    print("\nSearch provider setup (leave blank to skip):")
+    print("  (SearchAPI.io or Tavily recommended — DuckDuckGo works without a key)")
+    search_mapping = [
+        ("SEARCHAPI_API_KEY", "SearchAPI.io key (searchapi.io — recommended)"),
+        ("TAVILY_API_KEY", "Tavily API key (tavily.com — alternative)"),
+    ]
+    for env_name, label in search_mapping:
+        existing = os.environ.get(env_name, "") or str(existing_env.get(env_name, "") or "")
+        if existing and existing not in {"stub", ""}:
+            print(f"  {label}: already set")
+            continue
+        val = input(f"  {label}: ").strip()
         if val:
             os.environ[env_name] = val
             save_env_key(env_name, val)

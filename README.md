@@ -47,13 +47,20 @@ Evidence items are embedded (Together.xyz BAAI/bge-base-en-v1.5, falls back to l
 
 ## Screenshot
 
-> **Run the CLI and take a screenshot, then drop it at `docs/screenshot.png`.**
-
 ```bash
 python -m frontend.cli
 ```
 
-![CLI Screenshot](docs/screenshot.png)
+The CLI shows a live event stream with agent status lines:
+
+```
+◆ Planner      3 steps — planner→groq/gpt-oss-120b  researcher→groq/llama-scout
+◈ Researcher   "latest AI inference benchmark 2025"
+◈ Researcher   "groq vs together ai latency comparison"
+◎ Verifier     score 0.82
+◉ Analyst      ready to write — 6 verified sources
+✦ Writer       6 sources → writing
+```
 
 ---
 
@@ -74,14 +81,23 @@ cp .env.example .env
 Minimum required: `GROQ_API_KEY` **or** `ANTHROPIC_API_KEY`. Search works without a paid key (falls back to DuckDuckGo → Wikipedia), but `SEARCHAPI_API_KEY` gives much better results.
 
 ```env
-GROQ_API_KEY=...
-ANTHROPIC_API_KEY=...
-SEARCHAPI_API_KEY=...          # searchapi.io — recommended for search quality
-TOGETHER_API_KEY=...           # for Neural Cartographer embeddings
+# LLM providers — at least one required
+GROQ_API_KEY=...               # console.groq.com — free tier, fast
+ANTHROPIC_API_KEY=...          # console.anthropic.com — Claude models
+OPENAI_API_KEY=...             # platform.openai.com
+DEEPSEEK_API_KEY=...           # api.together.xyz — Together.ai key (powers DeepSeek/Llama models)
+GEMINI_API_KEY=...             # aistudio.google.com — used as fallback
 
+# Search providers — at least one recommended
+SEARCHAPI_API_KEY=...          # searchapi.io — recommended for search quality
+TAVILY_API_KEY=...             # tavily.com — alternative search provider
+
+# Model overrides (optional — defaults shown)
 MODEL_GROQ=openai/gpt-oss-120b
 MODEL_GROQ_BACKUP=openai/gpt-oss-20b
-MODEL_GROQ_KIMI_K2=moonshotai/kimi-k2-instruct
+MODEL_GROQ_QWEN32B=qwen/qwen3-32b           # mid-tier Groq reasoning
+MODEL_GROQ_LLAMA_SCOUT=meta-llama/llama-4-scout-17b-16e-instruct  # fast tool/search lane
+MODEL_GROQ_KIMI_K2=moonshotai/kimi-k2-instruct  # writer lane in balanced mode
 MODEL_ANTHROPIC=claude-sonnet-4-6
 MODEL_ANTHROPIC_OPUS=claude-opus-4-6
 
@@ -160,6 +176,7 @@ Supported: `::budget=`, `::depth=`, `::provider=`, `::lane=`, `::mode=`
 --provider-pref       auto | mixed | groq | anthropic | together | gemini | openai
 --lane-preference     auto | both | fast | deep
 --detail-level        compact | brief | detail       (default: compact)
+--thinking-default    on | off                       (default: on — show agent reasoning)
 --auto-approve        Skip all HITL prompts
 --cross-session-memory  Enable u-mem cross-session context
 --resume-session      Attach to an existing session ID
@@ -175,28 +192,55 @@ Supported: `::budget=`, `::depth=`, `::provider=`, `::lane=`, `::mode=`
 |---|---|
 | `Ctrl+O` | Switch to detail mode (full rationale, model tags, orchestration tree) |
 | `Ctrl+B` | Switch to compact mode |
+| `detail` or `o` + Enter | Switch to detail mode |
+| `compact`, `b`, or `d` + Enter | Switch to compact mode |
+| `brief` + Enter | Switch to brief mode |
+| `thinking on` or `t on` + Enter | Show agent reasoning output |
+| `thinking off` or `t off` + Enter | Hide agent reasoning output |
 | `steer: <message>` + Enter | Send a steering message to the orchestrator |
 | HITL prompt answer + Enter | Submit answer to a HITL checkpoint |
 | `Ctrl+C` | Exit |
-
-Type `detail`, `brief`, or `compact` + Enter to switch display modes at any time.
 
 ---
 
 ## Budget and Model Routing
 
-| Mode | Planner | Researcher | Writer | Max Steps |
+The system auto-selects models based on which API keys are present and the `--budget-mode` flag.
+
+### When Groq key is set (default fast path)
+
+| Mode | Planner | Researcher lanes | Analyst | Writer | Max Steps |
+|---|---|---|---|---|---|
+| `low` | gpt-oss-20b (Groq) | gpt-oss-20b × 1 | gpt-oss-20b | gpt-oss-20b | 8 |
+| `balanced` | gpt-oss-120b (Groq) | scout + qwen32b + kimi-k2 | gpt-oss-120b | kimi-k2 / mid | 20 |
+| `high` + Anthropic | Claude Opus | llama-scout + qwen32b + kimi-k2 | Claude Opus | Claude Sonnet | 50 |
+
+### When only Anthropic key is set
+
+| Mode | Planner | Researcher | Analyst | Writer |
 |---|---|---|---|---|
-| `low` | small Groq | small Groq | mid Groq | 8 |
-| `balanced` | large Groq | mixed scouts | Kimi-K2 / mid | 20 |
-| `high` + Anthropic | Claude Opus | Groq scouts (diverse) | Claude Sonnet | 50 |
+| `low` | Haiku | Haiku | Haiku | Haiku |
+| `balanced` | Sonnet | Haiku + Sonnet | Sonnet | Sonnet |
+| `high` | Opus | Haiku + Sonnet | Opus | Sonnet |
+
+### Model configuration
+
+The three optional Groq model slots control how researcher diversity works:
+
+| Env var | Default | Role |
+|---|---|---|
+| `MODEL_GROQ` | `openai/gpt-oss-120b` | Primary large reasoning model |
+| `MODEL_GROQ_BACKUP` | `openai/gpt-oss-20b` | Small/fast fallback |
+| `MODEL_GROQ_QWEN32B` | `qwen/qwen3-32b` | Mid-tier reasoning lane |
+| `MODEL_GROQ_LLAMA_SCOUT` | `meta-llama/llama-4-scout-17b-16e-instruct` | Fast tool/search lane |
+| `MODEL_GROQ_KIMI_K2` | `moonshotai/kimi-k2-instruct` | Writer lane (balanced mode) |
 
 `--depth quick` reduces researcher count and verifier passes. `--depth deep` adds up to 2 extra researchers and an extra verifier pass (capped at 6 researchers, 3 passes).
 
 The planner can override all routing decisions via its `agent_config` response — model assignments, researcher lane count, verifier passes, and minimum evidence threshold are all planner-adjustable per query.
 
-**Provider fallback:** groq → anthropic → openai → together → gemini  
-**Search fallback:** searchapi.io → tavily → playwright → DuckDuckGo → Wikipedia
+**Provider fallback chain:** groq → anthropic → openai → together → gemini  
+**Search fallback chain:** searchapi.io → tavily → playwright → DuckDuckGo → Wikipedia
 
 ---
 
@@ -270,15 +314,31 @@ SSE events are typed (`plan_update`, `evidence_item`, `trace`, `thought_stream`,
 
 ---
 
-## Optional: Playwright
+## Optional: Browser Automation
 
-For JS-heavy pages and free-tier search without a SearchAPI key:
+Browser automation enables JS-heavy page extraction and free-tier search (no SearchAPI key required).
+
+### Option A — browser-use (recommended)
+
+[browser-use](https://github.com/browser-use/browser-use) is the most production-ready Python browser library (92k+ GitHub stars). Installing it sets up Playwright automatically.
+
+```bash
+pip install browser-use
+playwright install chromium
+```
+
+### Option B — Playwright only (lighter)
 
 ```bash
 ./scripts/install_playwright.sh
 ```
 
-Once installed, Playwright is automatically prioritized in the search chain.
+Once either is installed, the system detects it automatically (`playwright_available()`) and activates the browser search backend. No configuration needed.
+
+**What browser automation enables:**
+- Free search via DuckDuckGo/Bing scraping (no SearchAPI key needed)
+- JS-rendered page content extraction (React/Vue/Next.js sites)
+- Prioritized in the search chain when available
 
 ---
 
@@ -300,6 +360,28 @@ frontend/                 Terminal CLI — streaming, keyboard input, event rend
 agents/                   Per-agent persona definitions (*.AGENT.md)
 scripts/                  install_playwright.sh, demo.sh, check_providers.py
 infra/                    docker-compose, Supabase schema (optional)
+```
+
+---
+
+## Provider Health Check
+
+```bash
+python scripts/check_providers.py
+```
+
+Tests all configured LLM and search providers and reports which are reachable:
+
+```
+Research Swarm — Provider Health Check
+LLM Providers:
+  Groq                 [OK]
+  OpenAI               [OK]
+  Anthropic            [OK]
+  DeepSeek/Together    [SKIP] no key configured
+Search Providers:
+  SearchAPI.io         [OK]  5 results
+  Tavily               [SKIP] no key configured
 ```
 
 ---

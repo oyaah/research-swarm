@@ -21,7 +21,8 @@ from tools.contracts import tool_result
 
 @lru_cache(maxsize=1)
 def playwright_available() -> bool:
-    """Check if playwright and chromium are installed. Result is cached after first call."""
+    """Check if playwright and chromium are installed. Result is cached after first call.
+    Returns True if either `playwright` or `browser-use` (which requires playwright) is installed."""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -276,6 +277,17 @@ def web_search(
     return tool_result("error", {"results": [], "errors": errors, "provider_order": provider_order})
 
 
+@lru_cache(maxsize=1)
+def browser_use_available() -> bool:
+    """Check if browser-use is installed. Result cached after first call.
+    When browser-use is installed, Playwright (its required dependency) is also available."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("browser_use") is not None
+    except Exception:
+        return False
+
+
 def open_url(url: str, use_mock: bool) -> dict[str, Any]:
     try:
         if use_mock:
@@ -324,6 +336,9 @@ def wikipedia_lookup(query: str) -> dict[str, Any]:
 
 
 def playwright_fetch(url: str, timeout_ms: int = 15000) -> dict[str, Any]:
+    """Fetch a URL with full browser rendering (JS execution, dynamic content).
+    Requires playwright installed: `pip install browser-use && playwright install chromium`
+    or `pip install playwright && playwright install chromium`."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception as exc:
@@ -337,12 +352,10 @@ def playwright_fetch(url: str, timeout_ms: int = 15000) -> dict[str, Any]:
             )
             page = context.new_page()
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-            # Wait briefly for JS-rendered content to appear
             try:
                 page.wait_for_load_state("networkidle", timeout=min(5000, timeout_ms // 2))
             except Exception:
                 pass
-            # Extract structured content: article/main first, then body
             text = page.evaluate("""() => {
                 const sel = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]');
                 if (sel && sel.innerText.trim().length > 200) return sel.innerText.trim();
