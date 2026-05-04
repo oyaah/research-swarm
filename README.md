@@ -1,67 +1,83 @@
 # Research Swarm
 
-Autonomous multi-agent research system with LLM-driven orchestration. Not a pipeline — an arena where AI agents operate with true agency.Works with both open source and close sourced models.
+Autonomous multi-agent research system with LLM-driven orchestration. Not a pipeline — a hub-and-spoke swarm where the orchestrator decides what happens next using LLM reasoning over current state. Works with both open-source and closed-source models.
 
+---
 
-## What It Does
+## How It Works
 
-Submit a question. The swarm runs a coordinated research process:
+Submit a question. The swarm coordinates:
 
-1. **Planner** — breaks the question into a research plan with subquestions and tool assignments
-2. **Researcher** — runs parallel web searches, fetches URLs, normalizes evidence
-3. **Verifier** — scores each piece of evidence and flags contradictions
-4. **Analyst** — decides whether evidence is sufficient or whether to loop back for more research
-5. **Writer** — synthesizes a final report with citations
-6. **Neural Cartographer** — generates an Obsidian-compatible `.canvas` knowledge map from the evidence
+1. **Planner** — breaks the question into a research plan with subquestions, assigns tools, and decides model routing and resource allocation
+2. **Researcher** — runs parallel web searches, fetches and extracts page content, summarizes and stores evidence
+3. **Verifier** — scores each evidence item (0–1) for factual support and flags contradictions
+4. **Analyst** — evaluates evidence coverage, identifies gaps, decides whether to loop back for more research
+5. **Writer** — synthesizes a final markdown report with inline citations
+6. **Neural Cartographer** — embeds all evidence, projects to 2D via PCA, clusters by topic with K-Means, and generates an Obsidian `.canvas` knowledge map
 
-The Orchestrator is LLM-driven — it routes between agents dynamically based on current state and budget. No hardcoded `if/else` routing.
+The **Orchestrator** runs between every agent. It builds a state snapshot (evidence count, verification scores, budget remaining, last worker, etc.) and asks an LLM what to do next. No hardcoded `if/else` routing — the decision is made by reasoning over current state.
+
+---
 
 ## Architecture
 
 ```
                     ┌──────────────┐
-                    │ Orchestrator │ ← LLM-driven routing
+                    │ Orchestrator │ ← LLM routing over state snapshot
                     └──────┬───────┘
        ┌─────────┬────────┼────────┬──────────┬──────────┐
        ▼         ▼        ▼        ▼          ▼          ▼
    Planner  Researcher  Verifier  Analyst   Writer   HITL nodes
        │         │        │        │          │          │
        └─────────┴────────┴────────┴──────────┴──────────┘
-                    → back to Orchestrator
+                         → back to Orchestrator
 ```
+
+Safety rails enforce correctness without limiting the orchestrator's intelligence: no plan → force planner; budget exhausted → force writer; researcher exhausted → one replan attempt then write.
 
 ### Portfolio Mode
 
-Runs two independent research lanes in parallel (groq_fast + groq_deep) then picks the best result via Pareto frontier selection. Each lane is prefixed in the CLI output so interleaved logs are distinguishable.
+Runs 2–5 independent research lanes in parallel with different model configurations. When all lanes finish, a Pareto frontier eliminates dominated results (worse on every dimension), and a utility function picks the winner based on faithfulness, coverage, recency, novelty, cost, and latency — weighted by budget preference.
 
 ### Neural Cartographer
 
-After research completes, evidence items are embedded (Together.xyz BAAI/bge-base-en-v1.5) and projected to a 2D canvas via PCA. K-Means clusters similar findings. A single LLM call names each cluster. Cosine-similarity edges connect nearest semantic neighbors. Output: `artifacts/reports/{session_id}/knowledge_map.canvas`. If Obsidian is installed, the CLI auto-opens it.
+Evidence items are embedded (Together.xyz BAAI/bge-base-en-v1.5, falls back to local SentenceTransformer), projected to 2D via PCA, clustered with K-Means, and written as an Obsidian-compatible `.canvas` file. A single LLM call names each cluster. Cosine-similarity edges connect nearest semantic neighbors (threshold > 0.85). If Obsidian is installed, the CLI auto-opens the canvas on completion.
+
+---
+
+## Screenshot
+
+> **Run the CLI and take a screenshot, then drop it at `docs/screenshot.png`.**
+
+```bash
+python -m frontend.cli
+```
+
+![CLI Screenshot](docs/screenshot.png)
+
+---
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Install
 
 ```bash
 pip install -e .
 ```
 
-### 2. Configure environment
+### 2. Configure
 
 ```bash
 cp .env.example .env
-# Fill in your API keys
 ```
 
-Minimum required key: `GROQ_API_KEY` or `ANTHROPIC_API_KEY`.
+Minimum required: `GROQ_API_KEY` **or** `ANTHROPIC_API_KEY`. Search works without a paid key (falls back to DuckDuckGo → Wikipedia), but `SEARCHAPI_API_KEY` gives much better results.
 
-Key settings:
-
-```
+```env
 GROQ_API_KEY=...
 ANTHROPIC_API_KEY=...
-SEARCHAPI_API_KEY=...          # searchapi.io (recommended)
-TOGETHER_API_KEY=...           # for embeddings (Neural Cartographer)
+SEARCHAPI_API_KEY=...          # searchapi.io — recommended for search quality
+TOGETHER_API_KEY=...           # for Neural Cartographer embeddings
 
 MODEL_GROQ=openai/gpt-oss-120b
 MODEL_GROQ_BACKUP=openai/gpt-oss-20b
@@ -69,7 +85,6 @@ MODEL_GROQ_KIMI_K2=moonshotai/kimi-k2-instruct
 MODEL_ANTHROPIC=claude-sonnet-4-6
 MODEL_ANTHROPIC_OPUS=claude-opus-4-6
 
-# Budget tiers
 MAX_STEPS_LOW=8
 MAX_STEPS_BALANCED=20
 MAX_STEPS_HIGH=50
@@ -81,7 +96,7 @@ MAX_STEPS_HIGH=50
 uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
 
-No Docker required. Qdrant is in-memory. Supabase is optional (for session persistence across restarts).
+No Docker required. Qdrant runs in-memory. Supabase is optional (enables session persistence across restarts).
 
 ### 4. Run the CLI
 
@@ -89,155 +104,208 @@ No Docker required. Qdrant is in-memory. Supabase is optional (for session persi
 python -m frontend.cli
 ```
 
-First run starts a setup wizard and saves defaults to `~/.research_swarm/cli_setup.json`.
+First run launches a setup wizard and saves defaults to `~/.research_swarm/cli_setup.json`.
+
+---
 
 ## CLI Usage
 
-### Interactive mode
+### Interactive
 
 ```bash
 python -m frontend.cli
 ```
 
-Each prompt shows your current settings:
-
+Prompt shows current settings:
 ```
 mode: single  ·  budget: balanced  ·  depth: standard  ·  provider: auto
 What do you want to research?
 >
 ```
 
-### Single query (non-interactive)
+### Single query
 
 ```bash
 python -m frontend.cli --query "your question" --budget-mode high --depth deep
 ```
 
-### Portfolio mode (2 parallel lanes)
+### Portfolio mode
 
 ```bash
 python -m frontend.cli --mode portfolio --budget-mode high
 ```
 
-In interactive portfolio mode, you're prompted to pick lanes before each query:
-
+Interactive portfolio mode prompts for lane selection before each query:
 ```
 Portfolio lane: [1] both  [2] groq_fast  [3] groq_deep
 ```
 
 ### Inline overrides
 
-Append `::key=value` to any query without changing your default settings:
+Append `::key=value` to any query to override settings for that query only:
 
 ```
 Compare top LLM inference providers ::budget=high ::depth=deep ::provider=anthropic
 ```
 
-Supported overrides: `::budget=`, `::depth=`, `::provider=`, `::lane=`, `::mode=`
+Supported: `::budget=`, `::depth=`, `::provider=`, `::lane=`, `::mode=`
 
 ### All flags
 
 ```
---query              Research question
---budget-mode        low | balanced | high  (default: balanced)
---depth              quick | standard | deep  (default: standard)
---mode               single | portfolio  (default: single)
---provider-pref      auto | mixed | groq | anthropic | together | gemini | openai
---lane-preference    auto | both | fast | deep
---detail-level       compact | brief | detail  (default: compact)
---auto-approve       Skip all HITL prompts
+--query               Research question (non-interactive)
+--budget-mode         low | balanced | high          (default: balanced)
+--depth               quick | standard | deep        (default: standard)
+--mode                single | portfolio             (default: single)
+--provider-pref       auto | mixed | groq | anthropic | together | gemini | openai
+--lane-preference     auto | both | fast | deep
+--detail-level        compact | brief | detail       (default: compact)
+--auto-approve        Skip all HITL prompts
 --cross-session-memory  Enable u-mem cross-session context
---resume-session     Attach to an existing session ID
---setup              Re-run setup wizard
---reset-setup        Clear saved defaults
+--resume-session      Attach to an existing session ID
+--setup               Re-run setup wizard
+--reset-setup         Clear saved defaults
 ```
 
-## Keyboard Controls
+---
 
-Terminal is in cbreak mode during streaming:
+## Keyboard Controls (during streaming)
 
-| Key | Action |
-|-----|--------|
-| `Ctrl+O` | Detail mode (full rationale, model tags) |
-| `Ctrl+B` | Compact mode |
-| `steer: <msg>` + Enter | Inject steering message mid-run |
+| Key / Input | Action |
+|---|---|
+| `Ctrl+O` | Switch to detail mode (full rationale, model tags, orchestration tree) |
+| `Ctrl+B` | Switch to compact mode |
+| `steer: <message>` + Enter | Send a steering message to the orchestrator |
+| HITL prompt answer + Enter | Submit answer to a HITL checkpoint |
 | `Ctrl+C` | Exit |
 
-Type `detail`, `compact`, or `brief` + Enter to switch modes.
+Type `detail`, `brief`, or `compact` + Enter to switch display modes at any time.
 
-For HITL prompts, type your answer + Enter. Anything matching `"no preference"`, `"you decide"`, etc. auto-skips future HITL gates.
+---
+
+## Budget and Model Routing
+
+| Mode | Planner | Researcher | Writer | Max Steps |
+|---|---|---|---|---|
+| `low` | small Groq | small Groq | mid Groq | 8 |
+| `balanced` | large Groq | mixed scouts | Kimi-K2 / mid | 20 |
+| `high` + Anthropic | Claude Opus | Groq scouts (diverse) | Claude Sonnet | 50 |
+
+`--depth quick` reduces researcher count and verifier passes. `--depth deep` adds up to 2 extra researchers and an extra verifier pass (capped at 6 researchers, 3 passes).
+
+The planner can override all routing decisions via its `agent_config` response — model assignments, researcher lane count, verifier passes, and minimum evidence threshold are all planner-adjustable per query.
+
+**Provider fallback:** groq → anthropic → openai → together → gemini  
+**Search fallback:** searchapi.io → tavily → playwright → DuckDuckGo → Wikipedia
+
+---
+
+## HITL Gates
+
+Three optional checkpoints. All can be skipped with `--auto-approve` or by answering with a defer phrase (`"no preference"`, `"you decide"`, `"your call"`, etc.) — which also enables autonomous mode for the rest of the session.
+
+### Gate 1 — Plan approval (post-Planner)
+
+The planner decides whether to ask based on query ambiguity. If triggered:
+
+- **Approval** (`"yes"`, `"ok"`, `"approve"`) → proceed with current plan
+- **Defer phrase** → proceed + skip all future gates
+- **Substantive answer** (e.g. `"focus on the EU regulatory angle"`) → **forces a replan** with your feedback injected into the planner's context
+
+### Gate 2 — Analysis checkpoint (post-Analyst)
+
+The analyst requests clarification when evidence gaps are ambiguous. Substantive answers become `focus_query` for the next researcher pass.
+
+### Gate 3 — Draft review (post-Writer)
+
+Writer's draft can be reviewed before finalization. Substantive feedback triggers a targeted re-research pass.
+
+---
+
+## Steering
+
+Send a steering message at any point during active research:
+
+**CLI:** type `steer: focus on enforcement mechanisms` + Enter  
+**API:** `POST /v1/research/{session_id}/steer` with `{"message": "..."}`
+
+Steer messages go through the orchestrator, not directly to the researcher. The orchestrator LLM sees the message and decides:
+- **Refinement** of current direction → redirects researcher with the steer as `focus_query`
+- **Fundamentally new direction** → forces a replan with the steer injected into planner context
+
+In portfolio mode, steer messages are broadcast to all active lanes simultaneously.
+
+---
 
 ## Slash Commands
 
 | Command | Action |
-|---------|--------|
-| `/sessions` | List active + persisted sessions |
+|---|---|
+| `/sessions` | List active and persisted sessions |
 | `/resume <id>` | Attach to an existing session |
-| `/setup` | Provider key setup wizard |
+| `/setup` | Re-run provider key setup wizard |
 | `/mode single\|portfolio` | Switch mode |
+| `/budget low\|balanced\|high` | Change budget tier |
+| `/depth quick\|standard\|deep` | Change depth |
+| `/provider <name>` | Change provider preference |
+| `/memory on\|off` | Toggle cross-session memory |
+| `/view compact\|brief\|detail` | Switch display mode |
 | `/quit` | Exit |
 
-## Budget and Model Routing
+---
 
-| Mode | Planner | Researcher | Analyst | Writer | Max Steps |
-|------|---------|------------|---------|--------|-----------|
-| `low` | small Groq | small Groq | small Groq | mid Groq | 8 |
-| `balanced` | large Groq | mixed scouts | large Groq | kimi/mid | 20 |
-| `high` | Claude Opus | diverse Groq scouts | Claude Opus | Claude Sonnet | 50 |
+## API Reference
 
-The planner can override routing via `agent_config` in its response. Depth (`quick`/`standard`/`deep`) further scales researcher count and verifier passes.
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/research` | Start a session |
+| `GET` | `/v1/stream/{id}` | SSE event stream (real-time agent events) |
+| `GET` | `/v1/research/{id}` | Session status + final state |
+| `POST` | `/v1/research/{id}/resume` | Submit HITL answer |
+| `POST` | `/v1/research/{id}/steer` | Inject steering message |
+| `GET` | `/v1/sessions` | List all sessions |
+| `GET` | `/v1/tools` | Tool schema |
 
-**Provider fallback chain:** groq → anthropic → openai → together → gemini
+SSE events are typed (`plan_update`, `evidence_item`, `trace`, `thought_stream`, `hitl_request`, `done`, etc.) and include real data — URLs, scores, query strings, routing decisions — not LLM-generated status text.
 
-**Search fallback chain:** searchapi.io → tavily → playwright/DuckDuckGo → Bing → Wikipedia
+---
 
-## HITL Gates
+## Optional: Playwright
 
-Three optional checkpoints, all skippable:
-
-1. **Plan approval** — planner decides whether to ask based on query complexity
-2. **Analysis checkpoint** — analyst can request clarification mid-research
-3. **Draft review** — writer's draft before finalization
-
-## Optional: Playwright Search
-
-For JS-heavy pages and free-tier search:
+For JS-heavy pages and free-tier search without a SearchAPI key:
 
 ```bash
 ./scripts/install_playwright.sh
 ```
 
-Once installed, playwright is auto-prioritized in the search chain.
+Once installed, Playwright is automatically prioritized in the search chain.
 
-## Optional: Cross-Session Memory (u-mem)
+---
 
-Install [u-mem](https://github.com/oyaah/u-mem) and set `UMEM_SRC_PATH` if needed. Pass `--cross-session-memory` to recall context from previous sessions.
+## Optional: Cross-Session Memory
 
-## API Endpoints
+Install [u-mem](https://github.com/oyaah/u-mem) and pass `--cross-session-memory`. Previous session findings are recalled at session start and used as planner context.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/v1/research` | Start a session |
-| `GET` | `/v1/stream/{id}` | SSE event stream |
-| `GET` | `/v1/research/{id}` | Session status + final state |
-| `POST` | `/v1/research/{id}/resume` | Submit HITL answer |
-| `POST` | `/v1/research/{id}/steer` | Inject steering message |
-| `GET` | `/v1/sessions` | List sessions |
-| `GET` | `/v1/tools` | Tool schema |
-
-
+---
 
 ## File Layout
 
 ```
-api/                      FastAPI app, routes, models
-services/swarm_engine/    LangGraph runtime, LLM adapter, state, config, embeddings
-services/canvas/          Neural Cartographer (PCA → canvas, K-Means, cosine edges)
-services/memory/          Cross-session memory adapter (u-mem)
-tools/                    MCP-compatible tool implementations (search, fetch, qdrant)
-frontend/                 Terminal CLI (cli.py, cli_events.py, cli_commands.py, cli_http.py)
+api/                      FastAPI app, routes, request/response models
+services/swarm_engine/    LangGraph runtime, LLM adapter, state, budget config, embeddings
+services/canvas/          Neural Cartographer — PCA layout, K-Means, cosine edges, canvas output
+services/memory/          u-mem cross-session memory adapter
+tools/                    Search, URL fetch, Playwright, Qdrant, Wikipedia, HITL tools
+frontend/                 Terminal CLI — streaming, keyboard input, event rendering, slash commands
 agents/                   Per-agent persona definitions (*.AGENT.md)
 scripts/                  install_playwright.sh, demo.sh, check_providers.py
-infra/                    Supabase schema + docker-compose (optional)
-tests/                    pytest test suite
+infra/                    docker-compose, Supabase schema (optional)
+```
+
+---
+
+## Running Tests
+
+```bash
+python -m pytest tests/ -q
 ```
