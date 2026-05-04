@@ -20,18 +20,7 @@ The **Orchestrator** runs between every agent. It builds a state snapshot (evide
 ---
 
 ## Architecture
-
-```
-                    ┌──────────────┐
-                    │ Orchestrator │ ← LLM routing over state snapshot
-                    └──────┬───────┘
-       ┌─────────┬────────┼────────┬──────────┬──────────┐
-       ▼         ▼        ▼        ▼          ▼          ▼
-   Planner  Researcher  Verifier  Analyst   Writer   HITL nodes
-       │         │        │        │          │          │
-       └─────────┴────────┴────────┴──────────┴──────────┘
-                         → back to Orchestrator
-```
+![Research Swarm architecture](docs/architecture.png)
 
 Safety rails enforce correctness without limiting the orchestrator's intelligence: no plan → force planner; budget exhausted → force writer; researcher exhausted → one replan attempt then write.
 
